@@ -261,7 +261,7 @@ def extract_audio_url(video_url: str) -> dict:
         logger.warning(f"Arquivo de cookies não encontrado: {cookies_file}")
     
     ydl_opts = {
-        'format': 'bestaudio/best',
+        # Não especifica formato - deixa o yt-dlp escolher o melhor disponível
         'quiet': True,
         'no_warnings': True,
         'extract_flat': False,
@@ -269,11 +269,10 @@ def extract_audio_url(video_url: str) -> dict:
         # User-Agent e Headers para evitar bloqueio
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'referer': 'https://www.youtube.com/',
-        # Configurações para contornar login - AJUSTADO
+        # Configurações para contornar login - OTIMIZADO
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web'],
-                'player_skip': ['webpage'],
+                'player_client': ['android', 'ios'],
             }
         },
         # Cookies e autenticação - ATIVADO
@@ -296,8 +295,38 @@ def extract_audio_url(video_url: str) -> dict:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             
-            # Tenta obter URL direta
-            audio_url = info.get('url')
+            # Tenta obter URL direta de diferentes formas
+            audio_url = None
+            
+            # Método 1: URL direta no info
+            if 'url' in info and info['url']:
+                audio_url = info['url']
+            
+            # Método 2: Procura nos formatos disponíveis
+            elif 'formats' in info and info['formats']:
+                # Procura por formato de áudio
+                for fmt in info['formats']:
+                    # Prioriza formatos apenas de áudio
+                    if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
+                        audio_url = fmt.get('url')
+                        if audio_url:
+                            break
+                
+                # Se não encontrou áudio puro, pega qualquer formato com áudio
+                if not audio_url:
+                    for fmt in info['formats']:
+                        if fmt.get('acodec') != 'none' and fmt.get('url'):
+                            audio_url = fmt['url']
+                            break
+            
+            # Método 3: Tenta requested_formats
+            elif 'requested_formats' in info and info['requested_formats']:
+                for fmt in info['requested_formats']:
+                    if fmt.get('acodec') != 'none':
+                        audio_url = fmt.get('url')
+                        if audio_url:
+                            break
+            
             if not audio_url:
                 return {'error': 'Link de áudio não encontrado'}
             
