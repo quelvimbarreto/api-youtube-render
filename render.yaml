@@ -1,0 +1,22 @@
+services:
+  # Web Service
+  - type: web
+    name: youtube-audio-api
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app_flask:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.7
+      - key: DEBUG
+        value: false
+      - key: CACHE_TYPE
+        value: sqlite
+      - key: CACHE_TTL
+        value: 14400
+      - key: RATE_LIMIT_REQUESTS
+        value: 10
+      - key: CACHE_DB_PATH
+        value: /opt/render/project/src/cache.db
