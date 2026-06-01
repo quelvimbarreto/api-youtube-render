@@ -249,7 +249,7 @@ def extract():
 
 
 def extract_audio_url(video_url: str) -> dict:
-    """Extrai URL de áudio de um vídeo do YouTube."""
+    """Extrai URL de áudio de um vídeo do YouTube com múltiplos fallbacks."""
     # Caminho do arquivo de cookies
     cookies_file = os.getenv('YOUTUBE_COOKIES_FILE', 'youtube_cookies.txt')
     
@@ -260,37 +260,87 @@ def extract_audio_url(video_url: str) -> dict:
     else:
         logger.warning(f"Arquivo de cookies não encontrado: {cookies_file}")
     
-    ydl_opts = {
-        # Não especifica formato - deixa o yt-dlp escolher o melhor disponível
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False,
-        'nocheckcertificate': True,
-        # User-Agent e Headers para evitar bloqueio
-        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'referer': 'https://www.youtube.com/',
-        # Configurações para contornar login - OTIMIZADO
-        'extractor_args': {
-            'youtube': {
-                'player_client': ['android', 'ios'],
+    # Lista de configurações para tentar (em ordem de prioridade)
+    configs = [
+        {
+            'name': 'web_embedded',
+            'opts': {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'nocheckcertificate': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['web_embedded'],
+                    }
+                },
+                'cookiefile': cookies_file if cookies_exists else None,
             }
         },
-        # Cookies e autenticação - ATIVADO
-        'cookiefile': cookies_file if cookies_exists else None,
-        # Configurações de rede
-        'source_address': '0.0.0.0',
-        'force_ipv4': True,
-        'geo_bypass': True,
-        'socket_timeout': 30,
-        # Headers adicionais
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-us,en;q=0.5',
-            'Sec-Fetch-Mode': 'navigate',
+        {
+            'name': 'android',
+            'opts': {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'nocheckcertificate': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android'],
+                    }
+                },
+                'cookiefile': cookies_file if cookies_exists else None,
+            }
         },
-    }
+        {
+            'name': 'ios',
+            'opts': {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'nocheckcertificate': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['ios'],
+                    }
+                },
+                'cookiefile': cookies_file if cookies_exists else None,
+            }
+        },
+        {
+            'name': 'default',
+            'opts': {
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'nocheckcertificate': True,
+                'cookiefile': cookies_file if cookies_exists else None,
+            }
+        },
+    ]
     
+    last_error = None
+    
+    # Tenta cada configuração até uma funcionar
+    for config in configs:
+        try:
+            logger.info(f"Tentando configuração: {config['name']}")
+            result = _try_extract_with_config(video_url, config['opts'])
+            if result and 'audio_url' in result:
+                logger.info(f"✅ Sucesso com configuração: {config['name']}")
+                return result
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Falhou com {config['name']}: {last_error}")
+            continue
+    
+    # Se todas as configurações falharam
+    logger.error(f"Todas as configurações falharam. Último erro: {last_error}")
+    return {'error': 'Não foi possível extrair o áudio. Tente novamente mais tarde.'}
+
+
+def _try_extract_with_config(video_url: str, ydl_opts: dict) -> dict:
+    """Tenta extrair áudio com uma configuração específica."""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
@@ -328,11 +378,11 @@ def extract_audio_url(video_url: str) -> dict:
                             break
             
             if not audio_url:
-                return {'error': 'Link de áudio não encontrado'}
+                return None
             
             # Valida se a URL é válida
             if not audio_url.startswith('http'):
-                return {'error': 'URL de áudio inválida'}
+                return None
             
             return {
                 'audio_url': audio_url,
@@ -354,11 +404,11 @@ def extract_audio_url(video_url: str) -> dict:
         elif 'proxy' in error_msg.lower() or 'tunnel' in error_msg.lower():
             return {'error': 'Erro de conexão. O servidor pode estar bloqueando acesso ao YouTube.'}
         
-        return {'error': 'Erro ao processar o vídeo'}
+        raise  # Re-raise para tentar próxima configuração
         
     except Exception as e:
         logger.error(f'Erro inesperado: {str(e)}')
-        return {'error': 'Erro ao processar o vídeo'}
+        raise  # Re-raise para tentar próxima configuração
 
 
 @app.route('/health', methods=['GET'])

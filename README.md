@@ -83,6 +83,7 @@ curl -X POST https://seu-app.onrender.com/cache/clear
 - ✅ **Tratamento de erros robusto**
 - ✅ **Persistente** (cache sobrevive a reloads)
 - ✅ **Suporte a cookies** (para vídeos com restrição de idade/login)
+- ✅ **Sistema de fallback múltiplo** (4 configurações diferentes para máxima compatibilidade)
 
 ## 📦 Arquivos do Projeto
 
@@ -190,6 +191,24 @@ pip install --upgrade yt-dlp
 ```
 
 No Render, isso acontece automaticamente a cada deploy.
+
+### Erro "Requested format is not available"
+
+A API agora usa **sistema de fallback múltiplo** que tenta 4 configurações diferentes:
+1. `web_embedded` (melhor para servidores)
+2. `android` (mais confiável)
+3. `ios` (alternativa)
+4. `default` (última tentativa)
+
+Veja os logs para saber qual configuração funcionou:
+```
+INFO - Tentando configuração: web_embedded
+INFO - ✅ Sucesso com configuração: web_embedded
+```
+
+Se todas falharem, considere adicionar cookies (veja seção de Cookies).
+
+📚 **Guia completo:** [RENDER_FIX.md](RENDER_FIX.md)
 
 ### Cache não funciona
 
