@@ -269,12 +269,15 @@ def extract():
         logger.error(f'Erro ao extrair áudio: {str(e)}')
         return jsonify({'error': 'Erro interno no servidor'}), 500
 
-
 def extract_audio_url(video_url: str) -> dict:
-    """Extrai URL de áudio de um vídeo do YouTube."""
-    # Configuração android + process=False (funcionou nos testes)
-    # process=False evita o erro "Requested format is not available"
-    # Sem cookies: retorna lista completa de formatos (31+) incluindo audio
+    """Extrai URL de áudio com fallback inteligente.
+    
+    Estrategia:
+    1. Tenta sem cookies + android client (funciona em IPs residenciais)
+    2. Se YouTube bloquear (Sign in), tenta com cookies + web client (para datacenters)
+    """
+    # Primeira tentativa: sem cookies, android + process=False
+    # Funciona localmente (IP residencial) - retorna lista completa de formatos
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -286,90 +289,188 @@ def extract_audio_url(video_url: str) -> dict:
         },
     }
 
-    try:
-        result = _try_extract_with_config(video_url, ydl_opts)
-        if result and 'audio_url' in result:
-            return result
-    except Exception as e:
-        logger.error(f"Extração falhou: {e}")
+    result = _try_extract_with_config(video_url, ydl_opts)
+    if result and 'audio_url' in result:
+        return result
+    
+    # Se falhou por bloqueio do YouTube (comum em datacenters como Render)
+    # tenta com cookies de autenticacao
+    if result and 'error' in result and ('Sign in' in result['error'] or 'bloqueando' in result['error'].lower()):
+        logger.info("⚠️ YouTube bloqueou a requisicao. Tentando com cookies de autenticacao...")
+        cookies_result = _try_with_cookies(video_url)
+        if cookies_result and 'audio_url' in cookies_result:
+            return cookies_result
+        return cookies_result if cookies_result else result
+    
+    return result if result else {'error': 'Nao foi possivel extrair o audio.'}
 
-    logger.error("Falha ao extrair áudio")
-    return {'error': 'Não foi possível extrair o áudio. Tente novamente mais tarde.'}
+
+def _try_with_cookies(video_url: str) -> dict:
+    """Tenta extrair audio usando cookies de autenticacao (para Render/datacenter).
+    
+    NOTA: O client 'android' NAO suporta cookies (yt-dlp o skipsilenciosamente).
+    Por isso usamos 'web' client quando cookies estao presentes.
+    """
+    cookies_file = os.getenv('YOUTUBE_COOKIES_FILE', 'youtube_cookies.txt')
+    
+    if not os.path.exists(cookies_file):
+        logger.warning(f"Arquivo de cookies nao encontrado: {cookies_file}")
+        return {'error': 'YouTube bloqueou o acesso e arquivo de cookies nao encontrado.'}
+    
+    logger.info(f"Arquivo de cookies encontrado: {cookies_file}")
+    
+    cookies_to_use = cookies_file
+    
+    # Se o arquivo esta em /etc/secrets (read-only no Render), copia para /tmp
+    if cookies_file.startswith('/etc/secrets/'):
+        try:
+            import shutil
+            temp_cookies = '/tmp/youtube_cookies.txt'
+            shutil.copy2(cookies_file, temp_cookies)
+            cookies_to_use = temp_cookies
+            logger.info(f"Cookies copiados para: {temp_cookies}")
+        except Exception as e:
+            logger.error(f"Erro ao copiar cookies: {e}")
+            return {'error': 'Erro ao processar arquivo de cookies.'}
+    
+    # Tenta multiplas configuracoes com cookies
+    # Android NAO funciona com cookies (skipped by yt-dlp), entao usamos web client
+    configs = [
+        # Config 1: web + process=True + melhor formato
+        {
+            'format': 'bestaudio/best',
+            'quiet': True, 'no_warnings': True, 'nocheckcertificate': True,
+            'cookiefile': cookies_to_use,
+            'extractor_args': {'youtube': {'player_client': ['web']}},
+        },
+        # Config 2: web + process=False + busca manual de formatos
+        {
+            'quiet': True, 'no_warnings': True, 'nocheckcertificate': True,
+            'cookiefile': cookies_to_use,
+            'extractor_args': {'youtube': {'player_client': ['web']}},
+        },
+    ]
+    
+    for i, ydl_opts in enumerate(configs):
+        use_process = (i == 0)  # process=True para config 0, False para config 1
+        log_label = "process=True" if use_process else "process=False"
+        logger.info(f"Tentativa cookies config {i+1}: web client + {log_label}")
+        
+        try:
+            result = _try_extract_with_config(
+                video_url, ydl_opts, use_process=use_process
+            )
+            if result and 'audio_url' in result:
+                logger.info(f"Cookies config {i+1} funcionou!")
+                return result
+        except Exception as e:
+            logger.warning(f"Cookies config {i+1} falhou: {e}")
+            continue
+    
+    logger.error("Todas as tentativas com cookies falharam")
+    return {'error': 'Nao foi possivel extrair o audio mesmo com cookies. Os cookies podem ter expirado.'}
 
 
-def _try_extract_with_config(video_url: str, ydl_opts: dict) -> dict:
-    """Tenta extrair áudio com uma configuração específica."""
+def _try_extract_with_config(video_url: str, ydl_opts: dict, use_process: bool = False) -> dict:
+    """Tenta extrair audio com uma configuracao especifica do yt-dlp.
+    
+    Args:
+        video_url: URL do video do YouTube
+        ydl_opts: Opcoes para yt-dlp.YoutubeDL
+        use_process: Se True, usa process=True (deixa yt-dlp selecionar formato)
+                     Se False, usa process=False (retorna formatos crus)
+    """
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # process=False é CRÍTICO: evita o erro "Requested format is not available"
-            # ao retornar TODOS os formatos crus sem tentar selecionar um
-            logger.info(f"ℹ️ Extraindo com process=False para evitar erro de formato")
-            info = ydl.extract_info(video_url, download=False, process=False)
-            
-            # Tenta obter URL direta de diferentes formas
-            audio_url = None
-            
-            # Método 1: URL direta no info
-            if 'url' in info and info['url']:
-                audio_url = info['url']
-            
-            # Método 2: Procura nos formatos disponíveis
-            elif 'formats' in info and info['formats']:
-                # Procura por formato de áudio
-                for fmt in info['formats']:
-                    # Prioriza formatos apenas de áudio
-                    if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
-                        audio_url = fmt.get('url')
-                        if audio_url:
-                            break
+            if use_process:
+                logger.info("Extraindo com process=True (selecao automatica de formato)")
+                info = ydl.extract_info(video_url, download=False, process=True)
                 
-                # Se não encontrou áudio puro, pega qualquer formato com áudio
-                if not audio_url:
+                # Com process=True, yt-dlp ja seleciona o melhor formato
+                audio_url = info.get('url')
+                
+                # Se nao tem URL direta, tenta requested_formats
+                if not audio_url and 'requested_formats' in info:
+                    for fmt in info['requested_formats']:
+                        if fmt.get('acodec') != 'none':
+                            audio_url = fmt.get('url')
+                            if audio_url:
+                                break
+                
+                if audio_url and audio_url.startswith('http'):
+                    return {
+                        'audio_url': audio_url,
+                        'title': info.get('title'),
+                        'duration': info.get('duration'),
+                        'uploader': info.get('uploader'),
+                    }
+                return None
+            else:
+                # process=False: retorna formatos crus, fazemos a selecao manual
+                logger.info("Extraindo com process=False (selecao manual de formato)")
+                info = ydl.extract_info(video_url, download=False, process=False)
+                
+                audio_url = None
+                
+                # Metodo 1: URL direta no info
+                if 'url' in info and info['url']:
+                    audio_url = info['url']
+                
+                # Metodo 2: Procura nos formatos disponiveis
+                elif 'formats' in info and info['formats']:
+                    # Prioriza formatos apenas de audio
                     for fmt in info['formats']:
-                        if fmt.get('acodec') != 'none' and fmt.get('url'):
-                            audio_url = fmt['url']
-                            break
-            
-            # Método 3: Tenta requested_formats
-            elif 'requested_formats' in info and info['requested_formats']:
-                for fmt in info['requested_formats']:
-                    if fmt.get('acodec') != 'none':
-                        audio_url = fmt.get('url')
-                        if audio_url:
-                            break
-            
-            if not audio_url:
-                return None
-            
-            # Valida se a URL é válida
-            if not audio_url.startswith('http'):
-                return None
-            
-            return {
-                'audio_url': audio_url,
-                'title': info.get('title'),
-                'duration': info.get('duration'),
-                'uploader': info.get('uploader'),
-            }
+                        if fmt.get('acodec') != 'none' and fmt.get('vcodec') == 'none':
+                            audio_url = fmt.get('url')
+                            if audio_url:
+                                break
+                    
+                    # Se nao encontrou audio puro, pega qualquer formato com audio
+                    if not audio_url:
+                        for fmt in info['formats']:
+                            if fmt.get('acodec') != 'none' and fmt.get('url'):
+                                audio_url = fmt['url']
+                                break
+                
+                # Metodo 3: Tenta requested_formats
+                elif 'requested_formats' in info and info['requested_formats']:
+                    for fmt in info['requested_formats']:
+                        if fmt.get('acodec') != 'none':
+                            audio_url = fmt.get('url')
+                            if audio_url:
+                                break
+                
+                if not audio_url or not audio_url.startswith('http'):
+                    return None
+                
+                return {
+                    'audio_url': audio_url,
+                    'title': info.get('title'),
+                    'duration': info.get('duration'),
+                    'uploader': info.get('uploader'),
+                }
             
     except yt_dlp.utils.DownloadError as e:
         error_msg = str(e)
-        logger.error(f'Erro ao baixar informações do vídeo: {error_msg}')
+        logger.error(f"Erro ao baixar informacoes do video: {error_msg}")
         
         if 'Video unavailable' in error_msg:
-            return {'error': 'Vídeo não disponível'}
+            return {'error': 'Video nao disponivel'}
         elif 'Sign in' in error_msg or 'login' in error_msg.lower():
-            return {'error': 'YouTube está bloqueando acesso. Tente novamente em alguns minutos ou use cookies de autenticação.'}
+            return {'error': 'YouTube esta bloqueando acesso. Tente novamente em alguns minutos ou use cookies de autenticacao.'}
         elif 'player response' in error_msg.lower():
-            return {'error': 'Erro ao processar vídeo. Tente atualizar o yt-dlp: pip install --upgrade yt-dlp'}
+            return {'error': 'Erro ao processar video. Tente atualizar o yt-dlp: pip install --upgrade yt-dlp'}
         elif 'proxy' in error_msg.lower() or 'tunnel' in error_msg.lower():
-            return {'error': 'Erro de conexão. O servidor pode estar bloqueando acesso ao YouTube.'}
+            return {'error': 'Erro de conexao. O servidor pode estar bloqueando acesso ao YouTube.'}
+        elif 'Requested format' in error_msg:
+            return {'error': 'Formato de audio nao disponivel para este video.'}
         
-        raise  # Re-raise para tentar próxima configuração
+        logger.error(f"Erro nao tratado: {error_msg}")
+        return {'error': f'Erro ao extrair audio: {error_msg[:100]}'}
         
     except Exception as e:
-        logger.error(f'Erro inesperado: {str(e)}')
-        raise  # Re-raise para tentar próxima configuração
+        logger.error(f"Erro inesperado: {str(e)}")
+        return {'error': f'Erro inesperado: {str(e)[:100]}'}
 
 
 @app.route('/health', methods=['GET'])
