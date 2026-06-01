@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import subprocess
 import logging
 from functools import wraps
 from datetime import timedelta
@@ -52,6 +53,34 @@ app.config.update(
 # Configuração do cache
 cache_backend = None
 cache_type = 'memory'
+
+# --- Verificação de runtime JavaScript (Node.js/Deno) ---
+# O yt-dlp precisa de um interpretador JS externo para decifrar as assinaturas
+# do YouTube, que foram severamente endurecidas contra scrapers.
+JS_RUNTIME_AVAILABLE = False
+JS_RUNTIME_NAME = None
+
+for cmd in ['node', 'deno']:
+    try:
+        proc = subprocess.run(
+            [cmd, '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if proc.returncode == 0:
+            JS_RUNTIME_AVAILABLE = True
+            JS_RUNTIME_NAME = cmd
+            version = proc.stdout.strip()
+            logger.info(f"✅ Runtime JavaScript detectado: {cmd} ({version})")
+            break
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        continue
+
+if not JS_RUNTIME_AVAILABLE:
+    logger.warning("⚠️ Nenhum runtime JavaScript (Node.js/Deno) encontrado.")
+    logger.warning("   O yt-dlp pode falhar ao decifrar assinaturas do YouTube em datacenters.")
+    logger.warning("   Configure a variavel NODE_VERSION no Render para instalar Node.js.")
 
 # Tenta Redis primeiro (se configurado)
 if app.config['CACHE_TYPE'] in ['auto', 'redis'] and app.config['REDIS_URL']:
@@ -272,19 +301,28 @@ def extract():
 def extract_audio_url(video_url: str) -> dict:
     """Extrai URL de áudio com fallback inteligente.
     
-    Estrategia:
-    1. Tenta sem cookies + android client (funciona em IPs residenciais)
-    2. Se YouTube bloquear (Sign in), tenta com cookies + web client (para datacenters)
+    Estrategia (3 niveis):
+    1. player_client=default,-android_sdkless + (requer Node.js/Deno)
+       - Usa o interpretador JS para decifrar assinaturas do YouTube.
+       - Recomendado para Render.com / datacenters.
+    2. android client + process=False (funciona em IPs residenciais)
+    3. Cookies + web client (fallback final para datacenters)
     """
-    # Primeira tentativa: sem cookies, android + process=False
-    # Funciona localmente (IP residencial) - retorna lista completa de formatos
+    # Tentativa 1: default client (requer Node.js/Deno)
+    # O YouTube descontinuou o android_sdkless, entao desativamos explicitamente.
+    # Com Node.js/Deno, o yt-dlp consegue decifrar as assinaturas.
+    logger.info("=" * 50)
+    logger.info(f"🎯 JS runtime disponivel: {JS_RUNTIME_NAME or 'nenhum'}")
+    logger.info(f"🎯 Tentativa 1: player_client=default,-android_sdkless")
+    logger.info("=" * 50)
+
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
         'extractor_args': {
             'youtube': {
-                'player_client': ['android'],
+                'player_client': ['default', '-android_sdkless'],
             }
         },
     }
@@ -292,16 +330,29 @@ def extract_audio_url(video_url: str) -> dict:
     result = _try_extract_with_config(video_url, ydl_opts)
     if result and 'audio_url' in result:
         return result
-    
-    # Se falhou por bloqueio do YouTube (comum em datacenters como Render)
-    # tenta com cookies de autenticacao
-    if result and 'error' in result and ('Sign in' in result['error'] or 'bloqueando' in result['error'].lower()):
-        logger.info("⚠️ YouTube bloqueou a requisicao. Tentando com cookies de autenticacao...")
+
+    last_error = result.get('error', '') if result else ''
+    logger.info(f"⚠️ Tentativa 1 falhou: {last_error[:150] if last_error else 'sem resposta'}")
+
+    # Tentativa 2: android client (sem cookies, IPs residenciais)
+    logger.info(f"⚠️ Tentativa 2: android client...")
+    ydl_opts['extractor_args']['youtube']['player_client'] = ['android']
+
+    result = _try_extract_with_config(video_url, ydl_opts)
+    if result and 'audio_url' in result:
+        return result
+
+    last_error = result.get('error', '') if result else last_error
+    logger.info(f"⚠️ Tentativa 2 falhou: {last_error[:150] if last_error else 'sem resposta'}")
+
+    # Tentativa 3: cookies + web client (datacenters)
+    if 'Sign in' in last_error or 'bloqueando' in last_error.lower():
+        logger.info("⚠️ Tentativa 3: cookies + web client...")
         cookies_result = _try_with_cookies(video_url)
         if cookies_result and 'audio_url' in cookies_result:
             return cookies_result
-        return cookies_result if cookies_result else result
-    
+        return cookies_result if cookies_result else {'error': 'Nao foi possivel extrair o audio.'}
+
     return result if result else {'error': 'Nao foi possivel extrair o audio.'}
 
 

@@ -10,6 +10,8 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.7
+      - key: NODE_VERSION
+        value: 20
       - key: DEBUG
         value: false
       - key: CACHE_TYPE

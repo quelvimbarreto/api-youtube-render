@@ -1,0 +1,17 @@
+Para resolver isso de forma definitiva no Render.com, você tem duas abordagens principais: ajustar o yt-dlp com um Runtime Javascript ou usar proxies residenciais. Veja abaixo as soluções que funcionam:
+
+Solução 1: Instalar o Deno ou Node no Servidor (A "Bala de Prata" atual)
+O YouTube implementou mudanças severas na assinatura de vídeo (descontinuando os clientes antigos que o yt-dlp usava). Para contornar isso, o yt-dlp agora precisa de um interpretador JavaScript externo no servidor para decifrar as assinaturas do YouTube como se fosse um navegador real.
+
+Se você está usando uma imagem Docker personalizada ou um ambiente Linux no Render, garanta que:
+
+O Deno ou o Node.js estejam instalados na máquina.
+
+Você execute o yt-dlp explicitamente mandando ele usar o cliente web e desativando o cliente mobile antigo que está bloqueado.
+
+No seu código ou terminal, adicione este argumento:
+
+Bash
+yt-dlp --extractor-args "youtube:player_client=default,-android_sdkless" "URL_DO_VIDEO"
+
+Se o yt-dlp encontrar o comando deno ou node no sistema do Render, ele usará esse interpretador para passar pelas checagens básicas do YouTube.
