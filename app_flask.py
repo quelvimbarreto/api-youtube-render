@@ -298,97 +298,26 @@ def extract_audio_url(video_url: str) -> dict:
     else:
         logger.warning(f"Arquivo de cookies não encontrado: {cookies_file}")
         
-    # ⚠️ Cookies expirados podem CAUSAR falha de extração em vez de ajudar.
-    # Se as extrações falharem, tente remover o arquivo de cookies ou exportar cookies novos.
-    #
-    # Nota: process=False em extract_info() evita o erro "Requested format is not available"
-    # fazendo com que o yt-dlp retorne TODOS os formatos crus sem tentar selecionar um.
-    
-    configs = [
-        # 1. Sem restrição de player_client (mais compatível)
-        {
-            'name': 'default',
-            'opts': {
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-                'cookiefile': cookies_to_use,
+    # Configuração única que funcionou: android client + process=False
+    # process=False evita o erro "Requested format is not available"
+    # retornando todos os formatos crus sem selecionar um
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'nocheckcertificate': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['android'],
             }
         },
-        # 2. Android client (confiável)
-        {
-            'name': 'android',
-            'opts': {
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['android'],
-                    }
-                },
-                'cookiefile': cookies_to_use,
-            }
-        },
-        # 3. iOS client (alternativa)
-        {
-            'name': 'ios',
-            'opts': {
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['ios'],
-                    }
-                },
-                'cookiefile': cookies_to_use,
-            }
-        },
-        # 4. Web embedded (último com cookies)
-        {
-            'name': 'web_embedded',
-            'opts': {
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['web_embedded'],
-                    }
-                },
-                'cookiefile': cookies_to_use,
-            }
-        },
-        # 5. Fallback: sem cookies (caso estejam expirados e causando falha)
-        {
-            'name': 'no_cookies',
-            'opts': {
-                'quiet': True,
-                'no_warnings': True,
-                'nocheckcertificate': True,
-                'cookiefile': None,
-            }
-        },
-    ]
-    
-    last_error = None
-    
-    # Tenta cada configuração até uma funcionar
-    for config in configs:
-        try:
-            logger.info(f"Tentando configuração: {config['name']}")
-            result = _try_extract_with_config(video_url, config['opts'])
-            if result and 'audio_url' in result:
-                logger.info(f"✅ Sucesso com configuração: {config['name']}")
-                return result
-        except Exception as e:
-            last_error = str(e)
-            logger.warning(f"Falhou com {config['name']}: {last_error}")
-            continue
-    
-    # Se todas as configurações falharam
-    logger.error(f"Todas as configurações falharam. Último erro: {last_error}")
+        'cookiefile': cookies_to_use,
+    }
+
+    result = _try_extract_with_config(video_url, ydl_opts)
+    if result and 'audio_url' in result:
+        return result
+
+    logger.error(f"Falha ao extrair áudio")
     return {'error': 'Não foi possível extrair o áudio. Tente novamente mais tarde.'}
 
 
