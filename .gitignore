@@ -47,7 +47,4 @@ cache.db-journal
 # OS
 .DS_Store
 Thumbs.db
-test_extraction.py
-test_api_local.py
-FIX_FORMAT_ERROR.md
-RENDER_FIX.md
+

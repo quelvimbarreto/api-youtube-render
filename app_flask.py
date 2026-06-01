@@ -255,8 +255,24 @@ def extract_audio_url(video_url: str) -> dict:
     
     # Verifica se o arquivo de cookies existe
     cookies_exists = os.path.exists(cookies_file)
+    cookies_to_use = None
+    
     if cookies_exists:
-        logger.info(f"Usando arquivo de cookies: {cookies_file}")
+        logger.info(f"Arquivo de cookies encontrado: {cookies_file}")
+        
+        # Se o arquivo está em /etc/secrets (read-only no Render), copia para /tmp
+        if cookies_file.startswith('/etc/secrets/'):
+            try:
+                import shutil
+                temp_cookies = '/tmp/youtube_cookies.txt'
+                shutil.copy2(cookies_file, temp_cookies)
+                cookies_to_use = temp_cookies
+                logger.info(f"Cookies copiados para: {temp_cookies}")
+            except Exception as e:
+                logger.warning(f"Erro ao copiar cookies: {e}. Tentando sem cookies.")
+                cookies_to_use = None
+        else:
+            cookies_to_use = cookies_file
     else:
         logger.warning(f"Arquivo de cookies não encontrado: {cookies_file}")
     
@@ -274,7 +290,7 @@ def extract_audio_url(video_url: str) -> dict:
                         'player_client': ['web_embedded'],
                     }
                 },
-                'cookiefile': cookies_file if cookies_exists else None,
+                'cookiefile': cookies_to_use,
             }
         },
         {
@@ -289,7 +305,7 @@ def extract_audio_url(video_url: str) -> dict:
                         'player_client': ['android'],
                     }
                 },
-                'cookiefile': cookies_file if cookies_exists else None,
+                'cookiefile': cookies_to_use,
             }
         },
         {
@@ -304,7 +320,7 @@ def extract_audio_url(video_url: str) -> dict:
                         'player_client': ['ios'],
                     }
                 },
-                'cookiefile': cookies_file if cookies_exists else None,
+                'cookiefile': cookies_to_use,
             }
         },
         {
@@ -314,7 +330,7 @@ def extract_audio_url(video_url: str) -> dict:
                 'no_warnings': True,
                 'extract_flat': False,
                 'nocheckcertificate': True,
-                'cookiefile': cookies_file if cookies_exists else None,
+                'cookiefile': cookies_to_use,
             }
         },
     ]
