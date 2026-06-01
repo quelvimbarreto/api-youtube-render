@@ -298,9 +298,8 @@ def extract_audio_url(video_url: str) -> dict:
     else:
         logger.warning(f"Arquivo de cookies não encontrado: {cookies_file}")
         
-    # Configuração única que funcionou: android client + process=False
+    # Configuração android + process=False (funcionou nos testes)
     # process=False evita o erro "Requested format is not available"
-    # retornando todos os formatos crus sem selecionar um
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -314,6 +313,13 @@ def extract_audio_url(video_url: str) -> dict:
     }
 
     result = _try_extract_with_config(video_url, ydl_opts)
+    if result and 'audio_url' in result:
+        return result
+
+    # Fallback: tenta sem cookies (cookies expirados podem causar falha em alguns vídeos)
+    logger.info("ℹ️ Tentando sem cookies como fallback")
+    ydl_opts_no_cookies = {**ydl_opts, 'cookiefile': None}
+    result = _try_extract_with_config(video_url, ydl_opts_no_cookies)
     if result and 'audio_url' in result:
         return result
 
