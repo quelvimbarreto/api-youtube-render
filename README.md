@@ -82,6 +82,7 @@ curl -X POST https://seu-app.onrender.com/cache/clear
 - ✅ **Health check**
 - ✅ **Tratamento de erros robusto**
 - ✅ **Persistente** (cache sobrevive a reloads)
+- ✅ **Suporte a cookies** (para vídeos com restrição de idade/login)
 
 ## 📦 Arquivos do Projeto
 
@@ -113,11 +114,59 @@ curl -X POST http://localhost:5000/extract \
   -d '{"video_id": "dQw4w9WgXcQ"}'
 ```
 
+## 🍪 Configuração de Cookies (Opcional)
+
+Para acessar vídeos com restrição de idade ou que exigem login, você pode usar cookies do YouTube:
+
+### 1. Exportar Cookies do Navegador
+
+**Opção A: Extensão do Chrome/Firefox**
+1. Instale a extensão [Get cookies.txt LOCALLY](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+2. Acesse [youtube.com](https://youtube.com) e faça login
+3. Clique na extensão e exporte os cookies
+4. Salve como `youtube_cookies.txt` na raiz do projeto
+
+**Opção B: Usando yt-dlp**
+```bash
+yt-dlp --cookies-from-browser chrome --cookies youtube_cookies.txt "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+### 2. Configurar a API
+
+O arquivo `youtube_cookies.txt` já está configurado para ser usado automaticamente. A API detecta o arquivo e usa os cookies quando disponível.
+
+**Verificar se está funcionando:**
+```bash
+# Inicie a API e veja os logs
+python app_flask.py
+
+# Você verá: "Usando arquivo de cookies: youtube_cookies.txt"
+```
+
+### 3. Deploy no Render com Cookies
+
+Para usar cookies no Render.com:
+
+1. **Adicione o arquivo ao repositório:**
+   ```bash
+   git add youtube_cookies.txt
+   git commit -m "Add YouTube cookies"
+   git push
+   ```
+
+2. **Ou use variável de ambiente** (mais seguro):
+   - No dashboard do Render, vá em **Environment**
+   - Adicione: `YOUTUBE_COOKIES_FILE=/etc/secrets/youtube_cookies.txt`
+   - Use o Render Secret Files para fazer upload do arquivo
+
+⚠️ **Importante:** Cookies expiram! Atualize-os periodicamente (geralmente a cada 6 meses).
+
 ## ⚙️ Variáveis de Ambiente
 
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `DEBUG` | `False` | Modo debug |
+| `YOUTUBE_COOKIES_FILE` | `youtube_cookies.txt` | Caminho do arquivo de cookies |
 | `CACHE_TYPE` | `sqlite` | Tipo de cache (sqlite, memory) |
 | `CACHE_TTL` | `14400` | TTL do cache em segundos (4h) |
 | `CACHE_DB_PATH` | `cache.db` | Caminho do arquivo SQLite |

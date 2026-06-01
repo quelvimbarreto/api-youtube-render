@@ -250,6 +250,16 @@ def extract():
 
 def extract_audio_url(video_url: str) -> dict:
     """Extrai URL de áudio de um vídeo do YouTube."""
+    # Caminho do arquivo de cookies
+    cookies_file = os.getenv('YOUTUBE_COOKIES_FILE', 'youtube_cookies.txt')
+    
+    # Verifica se o arquivo de cookies existe
+    cookies_exists = os.path.exists(cookies_file)
+    if cookies_exists:
+        logger.info(f"Usando arquivo de cookies: {cookies_file}")
+    else:
+        logger.warning(f"Arquivo de cookies não encontrado: {cookies_file}")
+    
     ydl_opts = {
         'format': 'bestaudio/best',
         'quiet': True,
@@ -259,16 +269,15 @@ def extract_audio_url(video_url: str) -> dict:
         # User-Agent e Headers para evitar bloqueio
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'referer': 'https://www.youtube.com/',
-        # Configurações para contornar login
+        # Configurações para contornar login - AJUSTADO
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'web'],
-                'player_skip': ['webpage', 'configs'],
-                'skip': ['dash', 'hls'],
+                'player_client': ['android', 'ios', 'web'],
+                'player_skip': ['webpage'],
             }
         },
-        # Cookies e autenticação
-        'cookiefile': os.getenv('YOUTUBE_COOKIES_FILE', None),  # Opcional: arquivo de cookies
+        # Cookies e autenticação - ATIVADO
+        'cookiefile': cookies_file if cookies_exists else None,
         # Configurações de rede
         'source_address': '0.0.0.0',
         'force_ipv4': True,
