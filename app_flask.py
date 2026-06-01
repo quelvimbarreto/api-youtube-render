@@ -16,6 +16,28 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# CORS - permite requisições de clientes Dart/web de qualquer origem
+@app.after_request
+def add_cors_headers(response):
+    """Adiciona headers CORS para permitir requisições de clientes Dart/web."""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response
+
+
+@app.before_request
+def log_request():
+    """Loga detalhes de toda requisição recebida para debug."""
+    body = request.get_data(as_text=True)[:200] if request.data else ''
+    logger.info(
+        f"→ {request.method} {request.path} | "
+        f"Content-Type: {request.content_type} | "
+        f"User-Agent: {request.user_agent} | "
+        f"Body: {body}"
+    )
+
+
 # Configurações via variáveis de ambiente
 app.config.update(
     MAX_VIDEO_ID_LENGTH=int(os.getenv('MAX_VIDEO_ID_LENGTH', 20)),
@@ -519,7 +541,41 @@ def cache_stats():
         return jsonify({'error': 'Erro ao obter estatísticas'}), 500
 
 
+@app.errorhandler(404)
+def not_found(error):
+    """Handler para 404 que mostra as rotas disponíveis para debug."""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        methods = ','.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
+        routes.append(f"{rule.rule} [{methods}]")
+
+    logger.warning(f"❌ 404 - Rota não encontrada: {request.method} {request.path}")
+    logger.warning(f"📋 Rotas registradas: {routes}")
+
+    return jsonify({
+        'error': 'Rota não encontrada',
+        'path': request.path,
+        'method': request.method,
+        'available_routes': routes
+    }), 404
+
+
+# Handler para OPTIONS (CORS preflight para navegadores)
+@app.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    """Retorna 200 para preflight CORS em qualquer rota."""
+    return jsonify({}), 200
+
+
+# Log das rotas registradas na inicialização (roda também sob gunicorn)
+logger.info("🚀 Rotas registradas:")
+for rule in app.url_map.iter_rules():
+    methods = ','.join(sorted(rule.methods - {'HEAD', 'OPTIONS'}))
+    logger.info(f"   {rule.rule} [{methods}]")
+
+
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'False').lower() == 'true'
+    logger.info(f"✅ Servidor iniciando em 0.0.0.0:{port} (debug={debug})")
     app.run(host='0.0.0.0', port=port, debug=debug)
