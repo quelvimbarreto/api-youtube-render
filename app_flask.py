@@ -297,30 +297,30 @@ def extract_audio_url(video_url: str) -> dict:
             cookies_to_use = cookies_file
     else:
         logger.warning(f"Arquivo de cookies não encontrado: {cookies_file}")
+        
+    # ⚠️ Cookies expirados podem CAUSAR falha de extração em vez de ajudar.
+    # Se as extrações falharem, tente remover o arquivo de cookies ou exportar cookies novos.
+    #
+    # Nota: process=False em extract_info() evita o erro "Requested format is not available"
+    # fazendo com que o yt-dlp retorne TODOS os formatos crus sem tentar selecionar um.
     
-    # Lista de configurações para tentar (em ordem de prioridade)
     configs = [
+        # 1. Sem restrição de player_client (mais compatível)
         {
-            'name': 'web_embedded',
+            'name': 'default',
             'opts': {
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': False,
                 'nocheckcertificate': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['web_embedded'],
-                    }
-                },
                 'cookiefile': cookies_to_use,
             }
         },
+        # 2. Android client (confiável)
         {
             'name': 'android',
             'opts': {
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': False,
                 'nocheckcertificate': True,
                 'extractor_args': {
                     'youtube': {
@@ -330,12 +330,12 @@ def extract_audio_url(video_url: str) -> dict:
                 'cookiefile': cookies_to_use,
             }
         },
+        # 3. iOS client (alternativa)
         {
             'name': 'ios',
             'opts': {
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': False,
                 'nocheckcertificate': True,
                 'extractor_args': {
                     'youtube': {
@@ -345,14 +345,29 @@ def extract_audio_url(video_url: str) -> dict:
                 'cookiefile': cookies_to_use,
             }
         },
+        # 4. Web embedded (último com cookies)
         {
-            'name': 'default',
+            'name': 'web_embedded',
             'opts': {
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': False,
                 'nocheckcertificate': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['web_embedded'],
+                    }
+                },
                 'cookiefile': cookies_to_use,
+            }
+        },
+        # 5. Fallback: sem cookies (caso estejam expirados e causando falha)
+        {
+            'name': 'no_cookies',
+            'opts': {
+                'quiet': True,
+                'no_warnings': True,
+                'nocheckcertificate': True,
+                'cookiefile': None,
             }
         },
     ]
@@ -381,7 +396,10 @@ def _try_extract_with_config(video_url: str, ydl_opts: dict) -> dict:
     """Tenta extrair áudio com uma configuração específica."""
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(video_url, download=False)
+            # process=False é CRÍTICO: evita o erro "Requested format is not available"
+            # ao retornar TODOS os formatos crus sem tentar selecionar um
+            logger.info(f"ℹ️ Extraindo com process=False para evitar erro de formato")
+            info = ydl.extract_info(video_url, download=False, process=False)
             
             # Tenta obter URL direta de diferentes formas
             audio_url = None
