@@ -312,16 +312,23 @@ def extract_audio_url(video_url: str) -> dict:
         'cookiefile': cookies_to_use,
     }
 
-    result = _try_extract_with_config(video_url, ydl_opts)
-    if result and 'audio_url' in result:
-        return result
+    # Primeira tentativa: com cookies
+    try:
+        result = _try_extract_with_config(video_url, ydl_opts)
+        if result and 'audio_url' in result:
+            return result
+    except Exception as e:
+        logger.warning(f"Primeira tentativa falhou: {e}. Tentando fallback sem cookies.")
 
     # Fallback: tenta sem cookies (cookies expirados podem causar falha em alguns vídeos)
     logger.info("ℹ️ Tentando sem cookies como fallback")
     ydl_opts_no_cookies = {**ydl_opts, 'cookiefile': None}
-    result = _try_extract_with_config(video_url, ydl_opts_no_cookies)
-    if result and 'audio_url' in result:
-        return result
+    try:
+        result = _try_extract_with_config(video_url, ydl_opts_no_cookies)
+        if result and 'audio_url' in result:
+            return result
+    except Exception as e:
+        logger.error(f"Fallback sem cookies também falhou: {e}")
 
     logger.error(f"Falha ao extrair áudio")
     return {'error': 'Não foi possível extrair o áudio. Tente novamente mais tarde.'}
